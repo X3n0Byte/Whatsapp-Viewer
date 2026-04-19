@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--media',  default=_DEFAULT_MEDIA,  help=f'Pfad zum Medienordner (Standard: input_media/)')
     parser.add_argument('--output', default=_DEFAULT_OUTPUT,  help=f'Ausgabedatei (Standard: output/chat.html)')
     parser.add_argument('--me', default='', help='Dein Name im Chat (für rechte Blasen)')
+    parser.add_argument('--embed', action='store_true', help='Alle Medien als Base64 in die HTML einbetten (eine einzige portable Datei)')
     args = parser.parse_args()
 
     if not os.path.isfile(args.chat):
@@ -38,6 +39,7 @@ def main():
         me=args.me,
         media_dir=args.media,
         output_path=args.output,
+        embed=args.embed,
     )
 
 

@@ -1,6 +1,25 @@
 import os
+import base64
 import html as _html
 from datetime import datetime
+
+_MIME = {
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.png': 'image/png',  '.gif': 'image/gif',  '.webp': 'image/webp',
+    '.mp4': 'video/mp4',  '.mov': 'video/quicktime',
+    '.avi': 'video/x-msvideo', '.mkv': 'video/x-matroska',
+    '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
+    '.opus': 'audio/ogg', '.m4a': 'audio/mp4', '.aac': 'audio/aac',
+    '.pdf': 'application/pdf',
+}
+
+
+def _to_data_uri(filepath):
+    ext = os.path.splitext(filepath)[1].lower()
+    mime = _MIME.get(ext, 'application/octet-stream')
+    with open(filepath, 'rb') as f:
+        data = base64.b64encode(f.read()).decode('ascii')
+    return f'data:{mime};base64,{data}'
 
 _CSS = """
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -201,7 +220,7 @@ def _fmt_date(ts):
     return ts.strftime('%d.%m.%Y')
 
 
-def _media_tag(media, media_dir, output_path):
+def _media_tag(media, media_dir, output_path, embed=False):
     if media is None:
         return ''
     if media['type'] == 'omitted':
@@ -210,34 +229,69 @@ def _media_tag(media, media_dir, output_path):
     filepath = os.path.join(media_dir, filename) if media_dir and filename else None
     if not filepath or not os.path.exists(filepath):
         return f'<div class="media-wrap"><span class="media-omitted">📎 {_html.escape(filename or "")}</span></div>'
-    # Relativer Pfad von der HTML-Datei zur Mediendatei → portabel
-    rel_path = os.path.relpath(filepath, start=os.path.dirname(os.path.abspath(output_path)))
+
     ext = os.path.splitext(filename)[1].lower()
-    escaped_path = _html.escape(rel_path)
     escaped_name = _html.escape(filename)
+
+    if embed:
+        src = _to_data_uri(filepath)
+    else:
+        rel = os.path.relpath(filepath, start=os.path.dirname(os.path.abspath(output_path)))
+        src = _html.escape(rel)
+
     if ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp'):
-        return f'<div class="media-wrap"><img src="{escaped_path}" alt="{escaped_name}" loading="lazy" onclick="openImg(this)"></div>'
+        return f'<div class="media-wrap"><img src="{src}" alt="{escaped_name}" loading="lazy" onclick="openImg(this)"></div>'
     if ext in ('.mp4', '.mov', '.avi', '.mkv'):
-        return f'<div class="media-wrap"><video controls preload="metadata"><source src="{escaped_path}">{escaped_name}</video></div>'
+        return (
+            f'<div class="media-wrap">'
+            f'<video controls preload="metadata"><source src="{src}" type="{_MIME.get(ext, "video/mp4")}">'
+            f'{escaped_name}</video></div>'
+        )
     if ext in ('.mp3', '.ogg', '.opus', '.m4a', '.aac'):
         return (
             f'<div class="media-wrap">'
             f'<div style="font-size:12px;color:#667781;margin-bottom:3px">🎵 {escaped_name}</div>'
-            f'<audio controls preload="none"><source src="{escaped_path}">{escaped_name}</audio>'
+            f'<audio controls preload="none"><source src="{src}" type="{_MIME.get(ext, "audio/mpeg")}">'
+            f'{escaped_name}</audio></div>'
+        )
+    if embed:
+        # Dokumente: als Download-Link mit eingebetteten Daten
+        return (
+            f'<div class="media-wrap">'
+            f'<a class="doc-link" href="{src}" download="{escaped_name}">📄 {escaped_name}</a>'
             f'</div>'
         )
     return (
         f'<div class="media-wrap">'
-        f'<a class="doc-link" href="{escaped_path}">📄 {escaped_name}</a>'
+        f'<a class="doc-link" href="{src}">📄 {escaped_name}</a>'
         f'</div>'
     )
 
 
-def generate_html(messages, me, media_dir, output_path):
+def _media_size_mb(messages, media_dir):
+    total = 0
+    seen = set()
+    for msg in messages:
+        media = msg.get('media')
+        if not media or media['type'] != 'file' or not media['filename']:
+            continue
+        fp = os.path.join(media_dir, media['filename'])
+        if fp not in seen and os.path.exists(fp):
+            total += os.path.getsize(fp)
+            seen.add(fp)
+    return total / (1024 * 1024)
+
+
+def generate_html(messages, me, media_dir, output_path, embed=False):
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+
+    if embed and media_dir:
+        total_mb = _media_size_mb(messages, media_dir)
+        print(f'  Einbetten von ~{total_mb:.1f} MB Mediendaten …')
 
     parts = []
     current_date_label = None
+    media_count = 0
 
     for msg in messages:
         ts = msg['timestamp']
@@ -259,7 +313,11 @@ def generate_html(messages, me, media_dir, output_path):
         is_me = msg['sender'] == me
         side = 'me' if is_me else 'other'
         media = msg.get('media')
-        media_tag = _media_tag(media, media_dir, output_path)
+        if embed and media and media.get('type') == 'file':
+            media_count += 1
+            if media_count % 10 == 0:
+                print(f'  … {media_count} Medien eingebettet')
+        media_tag = _media_tag(media, media_dir, output_path, embed=embed)
 
         # Don't show raw filename as text when it's a media reference
         if media and media['type'] in ('file', 'omitted'):
@@ -308,5 +366,6 @@ def generate_html(messages, me, media_dir, output_path):
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(page)
 
+    size_mb = os.path.getsize(output_path) / (1024 * 1024)
     print(f'✓ HTML gespeichert: {output_path}')
-    print(f'  {len(messages)} Nachrichten verarbeitet.')
+    print(f'  {len(messages)} Nachrichten | {media_count} Medien eingebettet | {size_mb:.1f} MB')

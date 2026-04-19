@@ -161,9 +161,37 @@ def main():
     # ── 3. Absender wählen ───────────────────────────────────────────────────
     me = ask_sender(senders)
 
+    # ── Embed-Modus wählen ───────────────────────────────────────────────────
+    embed = False
+    if media_path:
+        total_bytes = sum(
+            os.path.getsize(os.path.join(media_path, f))
+            for f in os.listdir(media_path)
+            if os.path.isfile(os.path.join(media_path, f)) and not f.startswith('.')
+        )
+        total_mb = total_bytes / (1024 * 1024)
+        print(f"{B}Medien einbetten?{W}")
+        print(f"  {BD}[1]{W} {G}Ja{W}  – alle Medien direkt in die HTML einbetten")
+        print(f"       → eine einzige portable Datei, kein Ordner nötig")
+        print(f"       → geschätzte Dateigröße: ~{total_mb * 1.37:.0f} MB")
+        if total_mb > 200:
+            print(f"  {Y}  ⚠ Sehr große Medienmenge ({total_mb:.0f} MB) – Browser könnte langsam laden{W}")
+        print(f"  {BD}[2]{W} Nein – relative Pfade (Projektordner muss beibehalten werden)")
+        print()
+        while True:
+            raw = input("  Auswahl (1/2): ").strip()
+            if raw == '1':
+                embed = True
+                print(f"  {G}✓ Eingebetteter Modus{W}\n")
+                break
+            if raw == '2':
+                print(f"  {G}✓ Relativer Modus{W}\n")
+                break
+            print(f"  {R}Bitte 1 oder 2 eingeben.{W}")
+
     # ── HTML generieren ──────────────────────────────────────────────────────
     output_path = os.path.join(DIR_OUTPUT, 'chat.html')
-    generate_html(messages=messages, me=me, media_dir=media_path, output_path=output_path)
+    generate_html(messages=messages, me=me, media_dir=media_path, output_path=output_path, embed=embed)
 
     # ── Im Browser öffnen ────────────────────────────────────────────────────
     print(f"\n{G}Im Browser öffnen …{W}")
